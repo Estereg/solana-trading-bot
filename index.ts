@@ -14,17 +14,12 @@ import {
   RPC_WEBSOCKET_ENDPOINT,
   PRE_LOAD_EXISTING_MARKETS,
   LOG_LEVEL,
-  CHECK_IF_MUTABLE,
-  CHECK_IF_MINT_IS_RENOUNCED,
-  CHECK_IF_FREEZABLE,
-  CHECK_IF_BURNED,
   QUOTE_MINT,
   MAX_POOL_SIZE,
   MIN_POOL_SIZE,
   QUOTE_AMOUNT,
   PRIVATE_KEY,
   USE_SNIPE_LIST,
-  ONE_TOKEN_AT_A_TIME,
   AUTO_SELL_DELAY,
   MAX_SELL_RETRIES,
   AUTO_SELL,
@@ -45,10 +40,36 @@ import {
   FILTER_CHECK_INTERVAL,
   FILTER_CHECK_DURATION,
   CONSECUTIVE_FILTER_MATCHES,
+  MAX_TOKENS_AT_THE_TIME,
+  CHECK_IF_MINT_IS_RENOUNCED,
+  CHECK_IF_FREEZABLE,
+  CHECK_IF_BURNED,
+  CHECK_IF_MUTABLE,
+  CHECK_IF_SOCIALS,
+  TRAILING_STOP_LOSS,
+  SKIP_SELLING_IF_LOST_MORE_THAN,
+  MAX_LAG,
+  CHECK_HOLDERS,
+  CHECK_ABNORMAL_DISTRIBUTION,
+  CHECK_TOKEN_DISTRIBUTION,
+  TELEGRAM_CHAT_ID,
+  BLACKLIST_REFRESH_INTERVAL,
+  MACD_SHORT_PERIOD,
+  MACD_LONG_PERIOD,
+  MACD_SIGNAL_PERIOD,
+  RSI_PERIOD,
+  TELEGRAM_BOT_TOKEN,
+  AUTO_SELL_WITHOUT_SELL_SIGNAL,
+  BUY_SIGNAL_TIME_TO_WAIT,
+  BUY_SIGNAL_PRICE_INTERVAL,
+  BUY_SIGNAL_FRACTION_TIME_TO_WAIT,
+  BUY_SIGNAL_LOW_VOLUME_THRESHOLD,
+  USE_TELEGRAM,
+  USE_TA
 } from './helpers';
-import { version } from './package.json';
 import { WarpTransactionExecutor } from './transactions/warp-transaction-executor';
 import { JitoTransactionExecutor } from './transactions/jito-rpc-transaction-executor';
+import { TechnicalAnalysisCache } from './cache/technical-analysis.cache';
 
 const connection = new Connection(RPC_ENDPOINT, {
   wsEndpoint: RPC_WEBSOCKET_ENDPOINT,
@@ -71,7 +92,6 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
 
           WARP DRIVE ACTIVATED 🚀🐟
           Made with ❤️ by humans.
-          Version: ${version}                                          
   `);
 
   const botConfig = bot.config;
@@ -80,10 +100,8 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info(`Wallet: ${wallet.publicKey.toString()}`);
 
   logger.info('- Bot -');
+  logger.info(`Using transaction executor: ${TRANSACTION_EXECUTOR}`);
 
-  logger.info(
-    `Using ${TRANSACTION_EXECUTOR} executer: ${bot.isWarp || bot.isJito || (TRANSACTION_EXECUTOR === 'default' ? true : false)}`,
-  );
   if (bot.isWarp || bot.isJito) {
     logger.info(`${TRANSACTION_EXECUTOR} fee: ${CUSTOM_FEE}`);
   } else {
@@ -91,10 +109,11 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Compute Unit price (micro lamports): ${botConfig.unitPrice}`);
   }
 
-  logger.info(`Single token at the time: ${botConfig.oneTokenAtATime}`);
+  logger.info(`Max tokens at the time: ${botConfig.maxTokensAtTheTime}`);
   logger.info(`Pre load existing markets: ${PRE_LOAD_EXISTING_MARKETS}`);
   logger.info(`Cache new markets: ${CACHE_NEW_MARKETS}`);
   logger.info(`Log level: ${LOG_LEVEL}`);
+  logger.info(`Max lag: ${MAX_LAG}`);
 
   logger.info('- Buy -');
   logger.info(`Buy amount: ${botConfig.quoteAmount.toFixed()} ${botConfig.quoteToken.name}`);
@@ -112,6 +131,8 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
   logger.info(`Price check duration: ${botConfig.priceCheckDuration} ms`);
   logger.info(`Take profit: ${botConfig.takeProfit}%`);
   logger.info(`Stop loss: ${botConfig.stopLoss}%`);
+  logger.info(`Trailing stop loss: ${botConfig.trailingStopLoss}`);
+  logger.info(`Skip selling if lost more than: ${botConfig.skipSellingIfLostMoreThan}%`);
 
   logger.info('- Snipe list -');
   logger.info(`Snipe list: ${botConfig.useSnipeList}`);
@@ -125,13 +146,23 @@ function printDetails(wallet: Keypair, quoteToken: Token, bot: Bot) {
     logger.info(`Filter check interval: ${botConfig.filterCheckInterval} ms`);
     logger.info(`Filter check duration: ${botConfig.filterCheckDuration} ms`);
     logger.info(`Consecutive filter matches: ${botConfig.consecutiveMatchCount}`);
-    logger.info(`Check renounced: ${botConfig.checkRenounced}`);
-    logger.info(`Check freezable: ${botConfig.checkFreezable}`);
-    logger.info(`Check burned: ${botConfig.checkBurned}`);
+    logger.info(`Check renounced: ${CHECK_IF_MINT_IS_RENOUNCED}`);
+    logger.info(`Check freezable: ${CHECK_IF_FREEZABLE}`);
+    logger.info(`Check burned: ${CHECK_IF_BURNED}`);
+    logger.info(`Check mutable: ${CHECK_IF_MUTABLE}`);
+    logger.info(`Check socials: ${CHECK_IF_SOCIALS}`);
     logger.info(`Min pool size: ${botConfig.minPoolSize.toFixed()}`);
     logger.info(`Max pool size: ${botConfig.maxPoolSize.toFixed()}`);
   }
 
+  logger.info(`Check Holders: ${botConfig.checkHolders}`);    
+  logger.info(`Check Token Distribution: ${botConfig.checkTokenDistribution}`);
+  logger.info(`Check Abnormal Distribution: ${botConfig.checkAbnormalDistribution}`);
+  logger.info(`Blacklist refresh interval: ${BLACKLIST_REFRESH_INTERVAL}`);
+
+  logger.info(`Buy signal MACD: ${MACD_SHORT_PERIOD}/${MACD_LONG_PERIOD}/${MACD_SIGNAL_PERIOD}`);
+  logger.info(`Buy signal RSI: ${RSI_PERIOD}`);
+  
   logger.info('------- CONFIGURATION END -------');
 
   logger.info('Bot is running! Press CTRL + C to stop it.');
@@ -143,6 +174,8 @@ const runListener = async () => {
 
   const marketCache = new MarketCache(connection);
   const poolCache = new PoolCache();
+  const technicalAnalysisCache = new TechnicalAnalysisCache();
+
   let txExecutor: TransactionExecutor;
 
   switch (TRANSACTION_EXECUTOR) {
@@ -165,14 +198,11 @@ const runListener = async () => {
   const botConfig = <BotConfig>{
     wallet,
     quoteAta: getAssociatedTokenAddressSync(quoteToken.mint, wallet.publicKey),
-    checkRenounced: CHECK_IF_MINT_IS_RENOUNCED,
-    checkFreezable: CHECK_IF_FREEZABLE,
-    checkBurned: CHECK_IF_BURNED,
     minPoolSize: new TokenAmount(quoteToken, MIN_POOL_SIZE, false),
     maxPoolSize: new TokenAmount(quoteToken, MAX_POOL_SIZE, false),
     quoteToken,
     quoteAmount: new TokenAmount(quoteToken, QUOTE_AMOUNT, false),
-    oneTokenAtATime: ONE_TOKEN_AT_A_TIME,
+    maxTokensAtTheTime: MAX_TOKENS_AT_THE_TIME,
     useSnipeList: USE_SNIPE_LIST,
     autoSell: AUTO_SELL,
     autoSellDelay: AUTO_SELL_DELAY,
@@ -183,6 +213,8 @@ const runListener = async () => {
     unitPrice: COMPUTE_UNIT_PRICE,
     takeProfit: TAKE_PROFIT,
     stopLoss: STOP_LOSS,
+    trailingStopLoss: TRAILING_STOP_LOSS,
+    skipSellingIfLostMoreThan: SKIP_SELLING_IF_LOST_MORE_THAN,
     buySlippage: BUY_SLIPPAGE,
     sellSlippage: SELL_SLIPPAGE,
     priceCheckInterval: PRICE_CHECK_INTERVAL,
@@ -190,9 +222,26 @@ const runListener = async () => {
     filterCheckInterval: FILTER_CHECK_INTERVAL,
     filterCheckDuration: FILTER_CHECK_DURATION,
     consecutiveMatchCount: CONSECUTIVE_FILTER_MATCHES,
+    checkHolders:CHECK_HOLDERS,
+    checkTokenDistribution:CHECK_TOKEN_DISTRIBUTION,
+    checkAbnormalDistribution:CHECK_ABNORMAL_DISTRIBUTION,
+    telegramChatId:TELEGRAM_CHAT_ID,
+    telegramBotToken: TELEGRAM_BOT_TOKEN,
+    blacklistRefreshInterval: BLACKLIST_REFRESH_INTERVAL,
+    MACDLongPeriod: MACD_LONG_PERIOD,
+    MACDShortPeriod: MACD_SHORT_PERIOD,
+    MACDSignalPeriod: MACD_SIGNAL_PERIOD,
+    RSIPeriod: RSI_PERIOD,
+    autoSellWithoutSellSignal: AUTO_SELL_WITHOUT_SELL_SIGNAL,
+    buySignalTimeToWait: BUY_SIGNAL_TIME_TO_WAIT,
+    buySignalPriceInterval: BUY_SIGNAL_PRICE_INTERVAL,
+    buySignalFractionPercentageTimeToWait: BUY_SIGNAL_FRACTION_TIME_TO_WAIT,
+    buySignalLowVolumeThreshold: BUY_SIGNAL_LOW_VOLUME_THRESHOLD,
+    useTelegram: USE_TELEGRAM,
+    useTechnicalAnalysis: USE_TA
   };
 
-  const bot = new Bot(connection, marketCache, poolCache, txExecutor, botConfig);
+  const bot = new Bot(connection, marketCache, poolCache, txExecutor, technicalAnalysisCache, botConfig);
   const valid = await bot.validate();
 
   if (!valid) {
@@ -223,9 +272,19 @@ const runListener = async () => {
     const poolOpenTime = parseInt(poolState.poolOpenTime.toString());
     const exists = await poolCache.get(poolState.baseMint.toString());
 
+    let currentTimestamp = Math.floor(new Date().getTime() / 1000);
+    let lag = currentTimestamp - poolOpenTime;
+
     if (!exists && poolOpenTime > runTimestamp) {
       poolCache.save(updatedAccountInfo.accountId.toString(), poolState);
-      await bot.buy(updatedAccountInfo.accountId, poolState);
+      
+      if(MAX_LAG != 0 && lag > MAX_LAG){
+        logger.trace(`Lag too high: ${lag} sec`);
+        return;
+      } else {
+        logger.trace(`Lag: ${lag} sec`);
+        await bot.buy(updatedAccountInfo.accountId, poolState, lag);
+      }
     }
   });
 
@@ -243,3 +302,4 @@ const runListener = async () => {
 };
 
 runListener();
+

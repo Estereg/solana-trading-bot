@@ -36,7 +36,7 @@ You should see the following output:
 #### Bot
 
 - `LOG_LEVEL` - Set logging level, e.g., `info`, `debug`, `trace`, etc.
-- `ONE_TOKEN_AT_A_TIME` - Set to `true` to process buying one token at a time.
+- `MAX_TOKENS_AT_THE_TIME` - Set to `1` to process buying one token at a time.
 - `COMPUTE_UNIT_LIMIT` - Compute limit used to calculate fees.
 - `COMPUTE_UNIT_PRICE` - Compute price used to calculate fees.
 - `PRE_LOAD_EXISTING_MARKETS` - Bot will load all existing markets in memory on start.
@@ -48,6 +48,9 @@ You should see the following output:
 - `CUSTOM_FEE` - If using warp or jito executors this value will be used for transaction fees instead of `COMPUTE_UNIT_LIMIT` and `COMPUTE_UNIT_LIMIT`
   - Minimum value is 0.0001 SOL, but we recommend using 0.006 SOL or above
   - On top of this fee, minimal solana network fee will be applied
+- `MAX_LAG` - Ignore tokens that PoolOpenTime is longer than now + `MAX_LAG` seconds
+- `USE_TA` - Use technical analysis for entries and exits (VERY HARD ON RPC's)
+- `USE_TELEGRAM` - Use telegram bot for notifications
 
 #### Buy
 
@@ -56,6 +59,10 @@ You should see the following output:
 - `AUTO_BUY_DELAY` - Delay in milliseconds before buying a token.
 - `MAX_BUY_RETRIES` - Maximum number of retries for buying a token.
 - `BUY_SLIPPAGE` - Slippage %
+- `BUY_SIGNAL_TIME_TO_WAIT` - Time to wait for buy signal in milliseconds
+- `BUY_SIGNAL_PRICE_INTERVAL` - Time between price checks for indicators
+- `BUY_SIGNAL_FRACTION_TIME_TO_WAIT` - % fraction how long to wait for indicator population of total time
+- `BUY_SIGNAL_LOW_VOLUME_THRESHOLD` - amount of different prices to collect before considered too low of a volume in relation to indicator population timer
 
 #### Sell
 
@@ -72,7 +79,12 @@ You should see the following output:
   - Take profit is calculated based on quote mint.
 - `STOP_LOSS` - Percentage loss at which to stop the loss.
   - Stop loss is calculated based on quote mint.
+- `TRAILING_STOP_LOSS` - Set to `true` to use trailing stop loss.
+- `SKIP_SELLING_IF_LOST_MORE_THAN` - If token loses more than X% of value, bot will not try to sell
+  - This config is useful if you find yourself in a situation when rugpull happen, and you failed to sell. In this case there is a big loss of value, and sometimes it's more beneficial to keep the token, instead of selling it for almost nothing.
 - `SELL_SLIPPAGE` - Slippage %.
+- `AUTO_SELL_WITHOUT_SELL_SIGNAL` - Set `false` to keep holding tokens in case didn't find sell signal
+- `KEEP_5_PERCENT_FOR_MOONSHOTS` - Keep 5% of token. WARNING: consider token account rent expenses and TAKE_PROFIT and STOP_LOSS is skewed by small amount. 
 
 #### Snipe list
 
@@ -102,6 +114,23 @@ Note: When using snipe list filters below will be disabled.
   - Set `0` to disable.
 - `MAX_POOL_SIZE` - Bot will buy only if the pool size is less than or equal the specified amount.
   - Set `0` to disable.
+- `BLACKLIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the blacklist.
+  - Blacklist checks update authority metadata of token, for "creator" wallets. 
+- `WHITELIST_REFRESH_INTERVAL` - Interval in milliseconds to refresh the whitelist 
+  - Whitelist checks update authority metadata of token, for "creator" wallets. 
+
+#### Holders
+
+- Check out .env.copy for variables. I took it from some dude on discord and it works great! Hah
+- Top holders are poor means: 1 SOL in lamports in more than 50% of wallets of top holders.
+- Pool wallet is not top wallet in holders means: Usually when tokens are sooo young, raydium must be top wallet, otherwise it's generally preminted.
+
+#### Technical analysis
+- `MACD_SHORT_PERIOD` - default 12
+- `MACD_LONG_PERIOD` - default 26
+- `MACD_SIGNAL_PERIOD` - default 9
+
+- `RSI_PERIOD` - default 14
 
 ## Warp transactions (beta)
 
@@ -149,8 +178,7 @@ To collect more information on an issue, please change `LOG_LEVEL` to `debug`.
 
 [![](https://img.shields.io/discord/1201826085655023616?color=5865F2&logo=Discord&style=flat-square)](https://discord.gg/xYUETCA2aP)
 
-- If you want to leave a tip, you can send it to the following address:
-  `7gm6BPQrSBaTAYaJheuRevBNXcmKsgbkfBCVSjBnt9aP`
+- If you want to leave a tip, send to original creator, i'm just a fork :)
 
 - If you need custom features or assistance, feel free to contact the admin team on discord for dedicated support.
 
